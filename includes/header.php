@@ -5,6 +5,7 @@ $pageTitle = $pageTitle ?? APP_NAME;
 $currentPage = $currentPage ?? '';
 $flash = get_flash();
 $user = current_user();
+$isAdminUser = is_admin();
 ?>
 <!doctype html>
 <html lang="en">
@@ -32,14 +33,18 @@ $user = current_user();
         </button>
         <div class="collapse navbar-collapse" id="mainNav">
             <ul class="navbar-nav me-auto mb-2 mb-lg-0 app-nav-links">
-                <li class="nav-item"><a class="nav-link <?= $currentPage === 'dashboard' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=dashboard')); ?>">Dashboard</a></li>
-                <li class="nav-item"><a class="nav-link <?= $currentPage === 'employees' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=employees')); ?>">Employees</a></li>
-                <li class="nav-item"><a class="nav-link <?= $currentPage === 'attendance' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=attendance')); ?>">Attendance</a></li>
-                <li class="nav-item"><a class="nav-link <?= $currentPage === 'reports' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=reports')); ?>">Reports</a></li>
+                <?php if ($isAdminUser): ?>
+                    <li class="nav-item"><a class="nav-link <?= $currentPage === 'dashboard' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=dashboard')); ?>">Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link <?= $currentPage === 'employees' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=employees')); ?>">Employees</a></li>
+                    <li class="nav-item"><a class="nav-link <?= $currentPage === 'attendance' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=attendance')); ?>">Attendance</a></li>
+                    <li class="nav-item"><a class="nav-link <?= $currentPage === 'reports' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=reports')); ?>">Reports</a></li>
+                    <li class="nav-item"><a class="nav-link <?= $currentPage === 'settings' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=settings')); ?>">Settings</a></li>
+                <?php else: ?>
+                    <li class="nav-item"><a class="nav-link <?= $currentPage === 'mobile-attendance' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=mobile-attendance')); ?>">Mobile Attendance</a></li>
+                <?php endif; ?>
                 <li class="nav-item"><a class="nav-link <?= $currentPage === 'leaves' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=leaves')); ?>">Leaves</a></li>
-                <li class="nav-item"><a class="nav-link <?= $currentPage === 'settings' ? 'active' : ''; ?>" href="<?= h(url('index.php?page=settings')); ?>">Settings</a></li>
             </ul>
-            <span class="navbar-text app-user me-3">Signed in as <?= h($user['username']); ?></span>
+            <span class="navbar-text app-user me-3">Signed in as <?= h($user['employee_name'] ?? $user['username']); ?></span>
             <a class="btn btn-outline-light btn-sm app-logout" href="<?= h(url('index.php?page=logout')); ?>">Logout</a>
         </div>
     </div>

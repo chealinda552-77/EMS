@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    role ENUM('admin', 'manager') NOT NULL DEFAULT 'admin',
+    role ENUM('admin', 'manager', 'employee') NOT NULL DEFAULT 'admin',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -36,8 +36,8 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
     employee_id INT UNSIGNED NOT NULL,
     clock_in_at DATETIME NOT NULL,
     clock_out_at DATETIME NULL,
-    clock_in_method ENUM('manual', 'api', 'webauthn', 'thumb') NOT NULL DEFAULT 'manual',
-    clock_out_method ENUM('manual', 'api', 'webauthn', 'thumb') NULL,
+    clock_in_method ENUM('manual', 'api', 'webauthn', 'thumb', 'fingerprint', 'card', 'face', 'qr') NOT NULL DEFAULT 'manual',
+    clock_out_method ENUM('manual', 'api', 'webauthn', 'thumb', 'fingerprint', 'card', 'face', 'qr') NULL,
     is_late TINYINT(1) NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_attendance_employee (employee_id),
@@ -67,11 +67,20 @@ CREATE TABLE IF NOT EXISTS scanner_settings (
 );
 
 ALTER TABLE attendance_logs
-    MODIFY clock_in_method ENUM('manual', 'api', 'webauthn', 'thumb') NOT NULL DEFAULT 'manual',
-    MODIFY clock_out_method ENUM('manual', 'api', 'webauthn', 'thumb') NULL;
+    MODIFY clock_in_method ENUM('manual', 'api', 'webauthn', 'thumb', 'fingerprint', 'card', 'face', 'qr') NOT NULL DEFAULT 'manual',
+    MODIFY clock_out_method ENUM('manual', 'api', 'webauthn', 'thumb', 'fingerprint', 'card', 'face', 'qr') NULL;
 
 ALTER TABLE scanner_settings
-    MODIFY scanner_mode ENUM('manual', 'api', 'webauthn', 'thumb') NOT NULL DEFAULT 'manual';
+    MODIFY scanner_mode ENUM('manual', 'api', 'webauthn', 'thumb') NOT NULL DEFAULT 'manual',
+    ADD COLUMN IF NOT EXISTS qr_secret VARCHAR(100) NOT NULL DEFAULT 'TEAM_PROJECT_QR',
+    ADD COLUMN IF NOT EXISTS allowed_network_prefix VARCHAR(100) NULL,
+    ADD COLUMN IF NOT EXISTS office_latitude DECIMAL(10,7) NULL,
+    ADD COLUMN IF NOT EXISTS office_longitude DECIMAL(10,7) NULL,
+    ADD COLUMN IF NOT EXISTS qr_max_distance_meters INT UNSIGNED NOT NULL DEFAULT 20;
+
+ALTER TABLE users
+    MODIFY role ENUM('admin', 'manager', 'employee') NOT NULL DEFAULT 'admin',
+    ADD COLUMN IF NOT EXISTS employee_id INT UNSIGNED NULL UNIQUE;
 
 INSERT INTO users (username, password_hash, role)
 VALUES ('admin', '$2y$10$Df37Y9NayngToGUhTjTcCeUq6sHVJ336YEltVsWqSUkX40coJMyly', 'admin')
@@ -88,6 +97,8 @@ VALUES
     ('EMP-1003', 'Anna', 'Reyes', 'anna.reyes@example.com', '555-1003', 1, 'HR Associate', 'active', 'FP-1003')
 ON DUPLICATE KEY UPDATE employee_code = VALUES(employee_code);
 
-INSERT INTO scanner_settings (id, scanner_mode, api_endpoint, shift_start_time)
-VALUES (1, 'manual', 'http://127.0.0.1:5000/scan', '09:00:00')
+INSERT INTO scanner_settings (
+    id, scanner_mode, api_endpoint, shift_start_time, qr_secret, allowed_network_prefix, office_latitude, office_longitude, qr_max_distance_meters
+)
+VALUES (1, 'manual', 'http://127.0.0.1:5000/scan', '09:00:00', 'TEAM_PROJECT_QR', '192.168.1.', NULL, NULL, 20)
 ON DUPLICATE KEY UPDATE id = VALUES(id);

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_login();
+require_admin();
 $pageTitle = 'Dashboard';
 
 $pdo = db();

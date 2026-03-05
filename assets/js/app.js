@@ -9,19 +9,43 @@
   var scanBtn = document.getElementById("scanBtn");
   var clockInBtn = document.getElementById("clockInBtn");
   var clockOutBtn = document.getElementById("clockOutBtn");
-  var fingerprintInput = document.getElementById("fingerprintInput");
+  var scanIdInput = document.getElementById("fingerprintInput");
   var methodInput = document.getElementById("fingerprintMethod");
   var statusBox = document.getElementById("attendanceStatus");
 
-  if (!fingerprintInput || !methodInput || !statusBox) {
+  if (!scanIdInput || !methodInput || !statusBox) {
     return;
   }
 
-  var currentMethod = config.mode || "manual";
+  var methodLabels = {
+    fingerprint: "Fingerprint",
+    card: "Card",
+    face: "Face Recognition",
+    qr: "QR Code",
+  };
+  var currentMethod = "fingerprint";
 
   function setStatus(message, type) {
     statusBox.className = "alert py-2 mb-0 alert-" + (type || "secondary");
     statusBox.textContent = message;
+  }
+
+  function getSelectedMethod() {
+    var method = (methodInput.value || "").toLowerCase();
+    if (!methodLabels[method]) {
+      return "fingerprint";
+    }
+    return method;
+  }
+
+  function updateMethodUi() {
+    var method = getSelectedMethod();
+    var methodLabel = methodLabels[method];
+    scanIdInput.placeholder = "Scan or type " + methodLabel.toLowerCase() + " ID";
+
+    if (scanBtn) {
+      scanBtn.textContent = "Scan " + methodLabel;
+    }
   }
 
   async function verifyWebAuthn() {
@@ -67,18 +91,20 @@
     return payload.fingerprint_id;
   }
 
-  async function scanFingerprint() {
-    var fingerprintId = "";
-    currentMethod = config.mode || "manual";
+  async function scanCredential() {
+    var scannedId = "";
+    currentMethod = getSelectedMethod();
+    var methodLabel = methodLabels[currentMethod] || "Fingerprint";
 
     if (config.mode === "api") {
-      setStatus("Requesting scanner service...", "info");
+      setStatus(
+        "Requesting scanner service for " + methodLabel.toLowerCase() + "...",
+        "info",
+      );
       try {
-        fingerprintId = await readFromApi();
-        currentMethod = "api";
-        setStatus("Fingerprint captured from scanner API.", "success");
+        scannedId = await readFromApi();
+        setStatus(methodLabel + " captured from scanner API.", "success");
       } catch (error) {
-        currentMethod = "manual";
         setStatus("API scan failed, switching to manual entry.", "warning");
       }
     }
@@ -87,10 +113,8 @@
       setStatus("Requesting biometric verification...", "info");
       var verified = await verifyWebAuthn();
       if (verified) {
-        currentMethod = "webauthn";
         setStatus("Biometric verification successful.", "success");
       } else {
-        currentMethod = "manual";
         setStatus(
           "Biometric verification unavailable, manual entry required.",
           "warning",
@@ -99,37 +123,36 @@
     }
 
     if (config.mode === "thumb") {
-      currentMethod = "thumb";
       setStatus(
-        "Thumb scan mode enabled. Capture thumb ID to continue.",
+        "Thumb scan mode enabled. Capture " +
+          methodLabel.toLowerCase() +
+          " ID to continue.",
         "info",
       );
     }
 
-    if (!fingerprintId) {
-      var promptLabel =
-        config.mode === "thumb"
-          ? "Enter scanned thumb ID:"
-          : "Enter scanned fingerprint ID:";
+    if (!scannedId) {
       var promptValue = window.prompt(
-        promptLabel,
-        fingerprintInput.value || "",
+        "Enter scanned " + methodLabel + " ID:",
+        scanIdInput.value || "",
       );
       if (!promptValue) {
         setStatus("Scan cancelled.", "secondary");
         return;
       }
-      fingerprintId = promptValue.trim();
+      scannedId = promptValue.trim();
     }
 
-    fingerprintInput.value = fingerprintId;
+    scanIdInput.value = scannedId;
     methodInput.value = currentMethod;
   }
 
   async function submitAttendance(action) {
-    var fingerprintId = (fingerprintInput.value || "").trim();
+    var fingerprintId = (scanIdInput.value || "").trim();
+    currentMethod = getSelectedMethod();
+
     if (!fingerprintId) {
-      setStatus("Fingerprint ID is required.", "warning");
+      setStatus((methodLabels[currentMethod] || "Scan") + " ID is required.", "warning");
       return;
     }
 
@@ -164,9 +187,17 @@
     }
   }
 
+  methodInput.addEventListener("change", function () {
+    currentMethod = getSelectedMethod();
+    updateMethodUi();
+  });
+
+  updateMethodUi();
+  currentMethod = getSelectedMethod();
+
   if (scanBtn) {
     scanBtn.addEventListener("click", function () {
-      scanFingerprint();
+      scanCredential();
     });
   }
 

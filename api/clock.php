@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/auth.php';
 
 require_login();
+require_admin();
 
 $payload = request_json();
 $token = $payload['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
@@ -14,6 +15,7 @@ if (!verify_csrf_token($token)) {
 $action = strtolower(trim((string) ($payload['action'] ?? '')));
 $fingerprintId = trim((string) ($payload['fingerprint_id'] ?? ''));
 $method = strtolower(trim((string) ($payload['method'] ?? 'manual')));
+$allowedMethods = array('manual', 'api', 'webauthn', 'thumb', 'fingerprint', 'card', 'face', 'qr');
 
 if (!in_array($action, array('in', 'out'), true)) {
     json_response(422, array('success' => false, 'message' => 'Action must be "in" or "out".'));
@@ -23,7 +25,7 @@ if ($fingerprintId === '') {
     json_response(422, array('success' => false, 'message' => 'Fingerprint ID is required.'));
 }
 
-if (!in_array($method, array('manual', 'api', 'webauthn', 'thumb'), true)) {
+if (!in_array($method, $allowedMethods, true)) {
     $method = 'manual';
 }
 

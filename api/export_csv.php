@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/auth.php';
 
 require_login();
+require_admin();
 
 $from = (string) ($_GET['from'] ?? date('Y-m-01'));
 $to = (string) ($_GET['to'] ?? date('Y-m-d'));

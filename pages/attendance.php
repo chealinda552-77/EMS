@@ -2,13 +2,31 @@
 declare(strict_types=1);
 
 require_login();
+require_admin();
 $pageTitle = 'Attendance';
 
 $pdo = db();
-$settings = $pdo->query('SELECT scanner_mode, api_endpoint, shift_start_time FROM scanner_settings WHERE id = 1')->fetch();
+$hasQrSecretColumn = table_has_column('scanner_settings', 'qr_secret');
+$settingsQuery = $hasQrSecretColumn
+    ? 'SELECT scanner_mode, api_endpoint, shift_start_time, qr_secret FROM scanner_settings WHERE id = 1'
+    : 'SELECT scanner_mode, api_endpoint, shift_start_time FROM scanner_settings WHERE id = 1';
+$settings = $pdo->query($settingsQuery)->fetch();
+if (!$settings) {
+    $settings = array(
+        'scanner_mode' => 'manual',
+        'api_endpoint' => '',
+        'shift_start_time' => '09:00:00',
+        'qr_secret' => 'TEAM_PROJECT_QR',
+    );
+}
 $scannerMode = $settings['scanner_mode'] ?? 'manual';
 $scannerEndpoint = $settings['api_endpoint'] ?? '';
 $shiftStart = $settings['shift_start_time'] ?? '09:00:00';
+$qrSecret = $hasQrSecretColumn ? (string) ($settings['qr_secret'] ?? 'TEAM_PROJECT_QR') : 'TEAM_PROJECT_QR';
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+$mobileAttendancePath = url('index.php?page=mobile-attendance&code=' . rawurlencode($qrSecret));
+$mobileAttendanceUrl = $scheme . '://' . $host . $mobileAttendancePath;
 
 $todayLogs = $pdo->query(
     "SELECT a.id, e.employee_code, CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
@@ -32,15 +50,20 @@ $todayLogs = $pdo->query(
             </div>
             <div class="card-body">
                 <p class="small text-muted">
-                    Configure scanner mode in Settings. In API mode, this page requests fingerprint data from your local scanner service endpoint. In thumb mode, enter/capture thumb ID.
+                    Configure scanner mode in Settings, then choose the scan method below: fingerprint, card, face recognition, or QR code.
                 </p>
                 <div class="mb-3">
-                    <label class="form-label">Biometric ID</label>
-                    <input id="fingerprintInput" class="form-control" placeholder="Scan or type fingerprint/thumb ID">
+                    <label class="form-label">Scan ID</label>
+                    <input id="fingerprintInput" class="form-control" placeholder="Scan or type ID">
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Detection Method</label>
-                    <input id="fingerprintMethod" class="form-control" value="<?= h($scannerMode); ?>" readonly>
+                    <select id="fingerprintMethod" class="form-select">
+                        <option value="fingerprint" selected>Fingerprint</option>
+                        <option value="card">Card</option>
+                        <option value="face">Face Recognition</option>
+                        <option value="qr">QR Code</option>
+                    </select>
                 </div>
                 <div class="d-flex flex-wrap gap-2 mb-3">
                     <button id="scanBtn" class="btn btn-outline-primary">Scan Fingerprint</button>
@@ -57,6 +80,22 @@ $todayLogs = $pdo->query(
                 <p class="small text-muted mt-2 mb-0">
                     Expected API response format: <code>{"fingerprint_id":"FP-1001"}</code>
                 </p>
+            </div>
+        </div>
+        <div class="card border-0 shadow-sm mt-3">
+            <div class="card-body">
+                <h2 class="h6">System QR Code (Shared)</h2>
+                <?php if (!$hasQrSecretColumn): ?>
+                    <div class="alert alert-warning py-2 small">Database migration is required to store QR settings. Using default QR token temporarily.</div>
+                <?php endif; ?>
+                <p class="small text-muted">
+                    This is the only QR code needed for all users. Attendance is separated automatically by each logged-in user account.
+                </p>
+                <div id="systemQrCanvasWrapper" class="text-center mb-3">
+                    <canvas id="systemQrCanvas" width="220" height="220" aria-label="System attendance QR code"></canvas>
+                </div>
+                <div class="small text-muted mb-1">QR Link</div>
+                <code class="small d-block text-break"><?= h($mobileAttendanceUrl); ?></code>
             </div>
         </div>
     </div>
@@ -108,6 +147,24 @@ $todayLogs = $pdo->query(
         </div>
     </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script>
+(function () {
+    var qrCanvas = document.getElementById("systemQrCanvas");
+    var qrUrl = <?= json_encode($mobileAttendanceUrl); ?>;
+    if (!qrCanvas || !window.QRCode || !window.QRCode.toCanvas) {
+        return;
+    }
+
+    window.QRCode.toCanvas(
+        qrCanvas,
+        qrUrl,
+        { width: 220, margin: 1 },
+        function () {}
+    );
+})();
+</script>
 
 <script>
 window.attendanceConfig = {

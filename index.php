@@ -20,7 +20,8 @@ if (!is_logged_in() && is_post()) {
     }
 
     set_flash('success', 'Login successful.');
-    redirect(url('index.php?page=dashboard'));
+    $targetPage = is_admin() ? 'dashboard' : 'mobile-attendance';
+    redirect(url('index.php?page=' . $targetPage));
 }
 
 if (!is_logged_in()) {
@@ -73,15 +74,17 @@ $pages = array(
     'dashboard' => __DIR__ . '/pages/dashboard.php',
     'employees' => __DIR__ . '/pages/employees.php',
     'attendance' => __DIR__ . '/pages/attendance.php',
+    'mobile-attendance' => __DIR__ . '/pages/mobile_attendance.php',
     'reports' => __DIR__ . '/pages/reports.php',
     'leaves' => __DIR__ . '/pages/leaves.php',
     'settings' => __DIR__ . '/pages/settings.php',
     'logout' => __DIR__ . '/pages/logout.php',
 );
 
-$currentPage = (string) ($_GET['page'] ?? 'dashboard');
+$defaultPage = is_admin() ? 'dashboard' : 'mobile-attendance';
+$currentPage = (string) ($_GET['page'] ?? $defaultPage);
 if (!array_key_exists($currentPage, $pages)) {
-    $currentPage = 'dashboard';
+    $currentPage = $defaultPage;
 }
 
 ob_start();

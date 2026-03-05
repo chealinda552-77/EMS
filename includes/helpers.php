@@ -141,3 +141,28 @@ function format_datetime($value)
 
     return date('Y-m-d H:i:s', $timestamp);
 }
+
+function table_has_column($table, $column)
+{
+    static $cache = array();
+    $key = (string) $table . '.' . (string) $column;
+
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    if (!function_exists('db')) {
+        $cache[$key] = false;
+        return false;
+    }
+
+    try {
+        $statement = db()->prepare('SHOW COLUMNS FROM `' . str_replace('`', '', (string) $table) . '` LIKE :column_name');
+        $statement->execute(array('column_name' => (string) $column));
+        $cache[$key] = (bool) $statement->fetch();
+    } catch (Throwable $throwable) {
+        $cache[$key] = false;
+    }
+
+    return $cache[$key];
+}

@@ -2,9 +2,11 @@
 declare(strict_types=1);
 
 require_login();
+require_admin();
 $pageTitle = 'Employees';
 
 $pdo = db();
+$canLinkUsers = users_support_employee_link();
 
 if (is_post()) {
     require_csrf();
@@ -18,8 +20,15 @@ if (is_post()) {
     $position = trim((string) ($_POST['position'] ?? ''));
     $status = trim((string) ($_POST['status'] ?? 'active'));
     $fingerprintId = trim((string) ($_POST['fingerprint_id'] ?? ''));
+    $loginUsername = trim((string) ($_POST['login_username'] ?? ''));
+    $loginPassword = (string) ($_POST['login_password'] ?? '');
     $departmentId = (int) ($_POST['department_id'] ?? 0);
     $departmentId = $departmentId > 0 ? $departmentId : null;
+
+    if (!$canLinkUsers && ($loginUsername !== '' || $loginPassword !== '')) {
+        set_flash('danger', 'Please run the latest database migration before creating employee login accounts.');
+        redirect(url('index.php?page=employees'));
+    }
 
     if ($action === 'delete') {
         $id = (int) ($_POST['id'] ?? 0);
@@ -44,6 +53,8 @@ if (is_post()) {
     }
 
     try {
+        $employeeId = 0;
+
         if ($action === 'update') {
             $id = (int) ($_POST['id'] ?? 0);
             if ($id <= 0) {
@@ -70,6 +81,7 @@ if (is_post()) {
                 'fingerprint_id' => $fingerprintId,
                 'id' => $id,
             ));
+            $employeeId = $id;
             set_flash('success', 'Employee updated.');
         } else {
             $statement = $pdo->prepare(
@@ -89,30 +101,108 @@ if (is_post()) {
                 'status' => $status,
                 'fingerprint_id' => $fingerprintId,
             ));
+            $employeeId = (int) $pdo->lastInsertId();
             set_flash('success', 'Employee created.');
+        }
+
+        if ($canLinkUsers && $employeeId > 0 && ($loginUsername !== '' || $loginPassword !== '')) {
+            $linkedUserStatement = $pdo->prepare('SELECT id, username FROM users WHERE employee_id = :employee_id LIMIT 1');
+            $linkedUserStatement->execute(array('employee_id' => $employeeId));
+            $linkedUser = $linkedUserStatement->fetch();
+
+            if ($linkedUser) {
+                $finalUsername = $loginUsername !== '' ? $loginUsername : (string) $linkedUser['username'];
+                if ($finalUsername === '') {
+                    throw new RuntimeException('Login username is required when managing employee account.');
+                }
+
+                if ($loginPassword !== '') {
+                    $updateUserStatement = $pdo->prepare(
+                        'UPDATE users SET username = :username, password_hash = :password_hash, role = :role, employee_id = :employee_id WHERE id = :id'
+                    );
+                    $updateUserStatement->execute(array(
+                        'username' => $finalUsername,
+                        'password_hash' => password_hash($loginPassword, PASSWORD_DEFAULT),
+                        'role' => 'employee',
+                        'employee_id' => $employeeId,
+                        'id' => $linkedUser['id'],
+                    ));
+                } else {
+                    $updateUserStatement = $pdo->prepare(
+                        'UPDATE users SET username = :username, role = :role, employee_id = :employee_id WHERE id = :id'
+                    );
+                    $updateUserStatement->execute(array(
+                        'username' => $finalUsername,
+                        'role' => 'employee',
+                        'employee_id' => $employeeId,
+                        'id' => $linkedUser['id'],
+                    ));
+                }
+            } else {
+                if ($loginUsername === '' || $loginPassword === '') {
+                    throw new RuntimeException('Both username and password are required to create an employee login account.');
+                }
+
+                $createUserStatement = $pdo->prepare(
+                    'INSERT INTO users (username, password_hash, role, employee_id) VALUES (:username, :password_hash, :role, :employee_id)'
+                );
+                $createUserStatement->execute(array(
+                    'username' => $loginUsername,
+                    'password_hash' => password_hash($loginPassword, PASSWORD_DEFAULT),
+                    'role' => 'employee',
+                    'employee_id' => $employeeId,
+                ));
+            }
         }
     } catch (PDOException $exception) {
         $message = $exception->getCode() === '23000'
-            ? 'Duplicate employee code or fingerprint ID.'
+            ? 'Duplicate employee code, fingerprint ID, or login username.'
             : 'Database error while saving employee.';
         set_flash('danger', $message);
+    } catch (RuntimeException $exception) {
+        set_flash('danger', $exception->getMessage());
     }
 
     redirect(url('index.php?page=employees'));
 }
 
 $departments = $pdo->query('SELECT id, name FROM departments ORDER BY name ASC')->fetchAll();
-$employees = $pdo->query(
-    "SELECT e.*, d.name AS department_name
-     FROM employees e
-     LEFT JOIN departments d ON d.id = e.department_id
-     ORDER BY e.created_at DESC"
-)->fetchAll();
+if ($canLinkUsers) {
+    $employees = $pdo->query(
+        "SELECT e.*, d.name AS department_name, u.username AS login_username
+         FROM employees e
+         LEFT JOIN departments d ON d.id = e.department_id
+         LEFT JOIN users u ON u.employee_id = e.id
+         ORDER BY e.created_at DESC"
+    )->fetchAll();
+} else {
+    $employees = $pdo->query(
+        "SELECT e.*, d.name AS department_name, NULL AS login_username
+         FROM employees e
+         LEFT JOIN departments d ON d.id = e.department_id
+         ORDER BY e.created_at DESC"
+    )->fetchAll();
+}
 
 $editEmployee = null;
 $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
 if ($editId > 0) {
-    $statement = $pdo->prepare('SELECT * FROM employees WHERE id = :id LIMIT 1');
+    if ($canLinkUsers) {
+        $statement = $pdo->prepare(
+            'SELECT e.*, u.username AS login_username
+             FROM employees e
+             LEFT JOIN users u ON u.employee_id = e.id
+             WHERE e.id = :id
+             LIMIT 1'
+        );
+    } else {
+        $statement = $pdo->prepare(
+            'SELECT e.*, NULL AS login_username
+             FROM employees e
+             WHERE e.id = :id
+             LIMIT 1'
+        );
+    }
     $statement->execute(array('id' => $editId));
     $editEmployee = $statement->fetch();
 }
@@ -185,6 +275,21 @@ $isEditing = is_array($editEmployee);
                     <label class="form-label">Position</label>
                     <input class="form-control" name="position" value="<?= h($editEmployee['position'] ?? ''); ?>">
                 </div>
+                <?php if ($canLinkUsers): ?>
+                    <div class="col-md-3">
+                        <label class="form-label">Login Username</label>
+                        <input class="form-control" name="login_username" value="<?= h($editEmployee['login_username'] ?? ''); ?>" placeholder="Optional">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Login Password</label>
+                        <input class="form-control" type="password" name="login_password" placeholder="<?= $isEditing ? 'Set to reset password' : 'Required to create login'; ?>">
+                        <div class="form-text"><?= $isEditing ? 'Leave blank to keep current password.' : 'Fill together with username to create a user login.'; ?></div>
+                    </div>
+                <?php else: ?>
+                    <div class="col-12">
+                        <div class="alert alert-warning mb-0">Database migration is required to enable employee login account linking.</div>
+                    </div>
+                <?php endif; ?>
             </div>
             <div class="mt-3 d-flex gap-2">
                 <button class="btn btn-primary" type="submit"><?= $isEditing ? 'Save Changes' : 'Create Employee'; ?></button>
@@ -209,13 +314,14 @@ $isEditing = is_array($editEmployee);
                 <th>Department</th>
                 <th>Position</th>
                 <th>Fingerprint ID</th>
+                <th>Login</th>
                 <th>Status</th>
                 <th class="text-end">Actions</th>
             </tr>
             </thead>
             <tbody>
             <?php if (!$employees): ?>
-                <tr><td colspan="7" class="text-center text-muted py-4">No employees found.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">No employees found.</td></tr>
             <?php else: ?>
                 <?php foreach ($employees as $employee): ?>
                     <tr>
@@ -227,6 +333,7 @@ $isEditing = is_array($editEmployee);
                         <td><?= h($employee['department_name'] ?: '-'); ?></td>
                         <td><?= h($employee['position'] ?: '-'); ?></td>
                         <td><code><?= h($employee['fingerprint_id']); ?></code></td>
+                        <td><?= h($employee['login_username'] ?: 'No account'); ?></td>
                         <td>
                             <?php if ($employee['status'] === 'active'): ?>
                                 <span class="badge text-bg-success">Active</span>

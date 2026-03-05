@@ -5,6 +5,9 @@ require_login();
 $pageTitle = 'Leaves';
 
 $pdo = db();
+$user = current_user();
+$isAdmin = is_admin();
+$userEmployeeId = (int) ($user['employee_id'] ?? 0);
 
 if (is_post()) {
     require_csrf();
@@ -12,11 +15,16 @@ if (is_post()) {
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'create') {
-        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        $employeeId = $isAdmin ? (int) ($_POST['employee_id'] ?? 0) : $userEmployeeId;
         $leaveType = trim((string) ($_POST['leave_type'] ?? 'Annual'));
         $startDate = trim((string) ($_POST['start_date'] ?? ''));
         $endDate = trim((string) ($_POST['end_date'] ?? ''));
         $reason = trim((string) ($_POST['reason'] ?? ''));
+
+        if (!$isAdmin && $employeeId <= 0) {
+            set_flash('danger', 'Your account is not linked to an employee profile. Contact Admin.');
+            redirect(url('index.php?page=leaves'));
+        }
 
         if ($employeeId <= 0 || $startDate === '' || $endDate === '') {
             set_flash('danger', 'Employee, start date, and end date are required.');
@@ -42,6 +50,11 @@ if (is_post()) {
     }
 
     if ($action === 'status') {
+        if (!$isAdmin) {
+            set_flash('danger', 'Only Admin can approve or reject leave requests.');
+            redirect(url('index.php?page=leaves'));
+        }
+
         $id = (int) ($_POST['id'] ?? 0);
         $status = (string) ($_POST['status'] ?? '');
         if ($id <= 0 || !in_array($status, array('approved', 'rejected'), true)) {
@@ -51,44 +64,71 @@ if (is_post()) {
 
         $statement = $pdo->prepare('UPDATE leave_requests SET status = :status WHERE id = :id');
         $statement->execute(array('status' => $status, 'id' => $id));
-        set_flash('success', 'Leave request updated.');
+        set_flash('success', 'Leave request updated by Admin.');
         redirect(url('index.php?page=leaves'));
     }
 }
 
-$employees = $pdo->query("SELECT id, employee_code, first_name, last_name FROM employees WHERE status = 'active' ORDER BY first_name ASC")->fetchAll();
-$leaves = $pdo->query(
-    "SELECT l.*, CONCAT(e.first_name, ' ', e.last_name) AS employee_name, e.employee_code
-     FROM leave_requests l
-     INNER JOIN employees e ON e.id = l.employee_id
-     ORDER BY l.created_at DESC"
-)->fetchAll();
+$employees = $isAdmin
+    ? $pdo->query("SELECT id, employee_code, first_name, last_name FROM employees WHERE status = 'active' ORDER BY first_name ASC")->fetchAll()
+    : array();
+
+if ($isAdmin) {
+    $leaves = $pdo->query(
+        "SELECT l.*, CONCAT(e.first_name, ' ', e.last_name) AS employee_name, e.employee_code
+         FROM leave_requests l
+         INNER JOIN employees e ON e.id = l.employee_id
+         ORDER BY l.created_at DESC"
+    )->fetchAll();
+} elseif ($userEmployeeId > 0) {
+    $statement = $pdo->prepare(
+        "SELECT l.*, CONCAT(e.first_name, ' ', e.last_name) AS employee_name, e.employee_code
+         FROM leave_requests l
+         INNER JOIN employees e ON e.id = l.employee_id
+         WHERE l.employee_id = :employee_id
+         ORDER BY l.created_at DESC"
+    );
+    $statement->execute(array('employee_id' => $userEmployeeId));
+    $leaves = $statement->fetchAll();
+} else {
+    $leaves = array();
+}
 ?>
 <div class="d-flex justify-content-between align-items-center page-header">
-    <h1 class="h3 mb-0">Leave Management</h1>
+    <h1 class="h3 mb-0"><?= $isAdmin ? 'Leave Management' : 'My Leave Requests'; ?></h1>
     <span class="text-muted"><?= h((string) count($leaves)); ?> requests</span>
 </div>
 
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white">
-        <h2 class="h6 mb-0">Create Leave Request</h2>
+        <h2 class="h6 mb-0"><?= $isAdmin ? 'Create Leave Request' : 'Request Leave'; ?></h2>
     </div>
     <div class="card-body">
+        <?php if (!$isAdmin && $userEmployeeId <= 0): ?>
+            <div class="alert alert-warning mb-0">Your account is not linked to an employee profile. Contact Admin before requesting leave.</div>
+        <?php else: ?>
         <form method="post" action="<?= h(url('index.php?page=leaves')); ?>">
             <input type="hidden" name="csrf_token" value="<?= h(csrf_token()); ?>">
             <input type="hidden" name="action" value="create">
             <div class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">Employee</label>
-                    <select class="form-select" name="employee_id" required>
-                        <option value="">Select employee</option>
-                        <?php foreach ($employees as $employee): ?>
-                            <option value="<?= h((string) $employee['id']); ?>">
-                                <?= h($employee['employee_code'] . ' - ' . $employee['first_name'] . ' ' . $employee['last_name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+                <?php if ($isAdmin): ?>
+                    <div class="col-md-4">
+                        <label class="form-label">Employee</label>
+                        <select class="form-select" name="employee_id" required>
+                            <option value="">Select employee</option>
+                            <?php foreach ($employees as $employee): ?>
+                                <option value="<?= h((string) $employee['id']); ?>">
+                                    <?= h($employee['employee_code'] . ' - ' . $employee['first_name'] . ' ' . $employee['last_name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php else: ?>
+                    <div class="col-md-4">
+                        <label class="form-label">Employee</label>
+                        <input class="form-control" value="<?= h(($user['employee_code'] ?? '-') . ' - ' . ($user['employee_name'] ?? $user['username'])); ?>" readonly>
+                    </div>
+                <?php endif; ?>
                 <div class="col-md-2">
                     <label class="form-label">Type</label>
                     <select class="form-select" name="leave_type">
@@ -115,6 +155,7 @@ $leaves = $pdo->query(
                 </div>
             </div>
         </form>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -157,7 +198,7 @@ $leaves = $pdo->query(
                             <?php endif; ?>
                         </td>
                         <td class="text-end">
-                            <?php if ($leave['status'] === 'pending'): ?>
+                            <?php if ($isAdmin && $leave['status'] === 'pending'): ?>
                                 <form method="post" action="<?= h(url('index.php?page=leaves')); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?= h(csrf_token()); ?>">
                                     <input type="hidden" name="action" value="status">
@@ -173,7 +214,7 @@ $leaves = $pdo->query(
                                     <button class="btn btn-sm btn-outline-danger">Reject</button>
                                 </form>
                             <?php else: ?>
-                                <span class="text-muted small">No action</span>
+                                <span class="text-muted small"><?= $leave['status'] === 'pending' ? 'Pending Admin review' : 'No action'; ?></span>
                             <?php endif; ?>
                         </td>
                     </tr>
